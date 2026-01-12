@@ -1,0 +1,6 @@
+pandas
+jinja2
+weasyprint
+xlsxwriter
+openpyxl
+pyinstaller

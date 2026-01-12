@@ -1,0 +1,149 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page { size: A4; margin: 18mm 14mm; }
+    body { font-family: Arial, sans-serif; font-size: 12px; color: #111; }
+    .header {
+      background: #0a1f44;
+      color: #fff;
+      padding: 20px 24px;
+      border-radius: 0px;
+      margin-bottom: 20px;
+    }
+    .header .logo-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header .logo-row .left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header .logo-row .right {
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .header .sub { 
+      margin-top: 8px; 
+      font-size: 13px; 
+      line-height: 1.4; 
+      font-weight: 500;
+      letter-spacing: 0.3px;
+    }
+    .toprow { display: flex; justify-content: space-between; margin-top: 20px; }
+    .box { width: 49%; }
+    .no { font-weight: 700; font-size: 13px; }
+    .billto { margin-top: 12px; }
+    .billto .label { font-weight: 700; margin-bottom: 8px; font-size: 13px; }
+    .billto div { line-height: 1.6; }
+    .for { margin-top: 14px; }
+    .for b { font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 18px; border: 1px solid #333; }
+    th, td { border: 1px solid #333; padding: 10px 12px; vertical-align: top; }
+    th { background: #f5f5f5; text-align: left; font-weight: 700; font-size: 11px; text-transform: uppercase; }
+    td { font-size: 12px; }
+    .right { text-align: right; }
+    .notes { margin-top: 16px; font-size: 10.5px; line-height: 1.5; }
+    .notes ol { margin: 8px 0; padding-left: 20px; }
+    .notes ol li { margin-bottom: 6px; }
+    .note-strong { margin-top: 14px; font-weight: 700; font-size: 11px; }
+    .breakdown { margin-top: 16px; font-weight: 700; font-size: 12px; text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo-row">
+      <div class="left">
+        <img src="logo.png" alt="I&C Logo" style="max-height: 65px; width: auto;">
+      </div>
+      <div class="right">
+        18878705606
+      </div>
+    </div>
+    <div class="sub">
+      广东省佛山市南海区里水镇北沙村石龙潭工业区9号加纳仓<br>
+      I&amp;C LOGISTICS GOODS BILL
+    </div>
+  </div>
+
+  <div class="toprow">
+    <div class="box">
+      <div class="no">NO. {{ invoice_no }}</div>
+      <div>Date: {{ invoice_date }}</div>
+
+      <div class="billto">
+        <div class="label">Bill To</div>
+        <div>{{ customer_name }}</div>
+        <div>{{ location }}</div>
+        <div>{{ phone }}</div>
+      </div>
+
+      <div class="for">
+        <div><b>For</b></div>
+        <div>SEA CARGO</div>
+      </div>
+    </div>
+
+    <div class="box right">
+       <!-- Logo moved to header -->
+    </div>
+  </div>
+
+  <table>
+    <tr>
+      <th>ITEM DESCRIBTION</th>
+      <th class="right">TOTAL CBM</th>
+    </tr>
+    <tr>
+      <td>
+        {{ item_description }}
+      </td>
+      <td class="right">{{ rate_usd_str }}</td>
+    </tr>
+    <tr>
+      <td><b>TOTAL CBM</b></td>
+      <td class="right"><b>CBM {{ cbm_str }}</b></td>
+    </tr>
+    <tr>
+      <td><b>PAYMENT DETAILS</b></td>
+      <td class="right"><b>{{ payment_details }}</b></td>
+    </tr>
+    <tr>
+      <td>Subtotal</td>
+      <td class="right">{{ subtotal_usd_str }}</td>
+    </tr>
+    <tr>
+      <td>OTHER COST</td>
+      <td class="right">{{ other_cost_usd_str }}</td>
+    </tr>
+    <tr>
+      <td><b>Total Cost</b></td>
+      <td class="right"><b>{{ total_usd_str }}</b></td>
+    </tr>
+  </table>
+
+  <div class="notes">
+    <ol>
+      <li>Make all checks payable to I&amp;C Shipping and Logistics.</li>
+      <li>Goods must be picked up within one week after notification to avoid paying up to 1% storage fee daily on total invoice amt.</li>
+      <li>Goods left in warehouse after 1 month without payment will be sold to cover shipping and storage fee with/without consent of the consignee</li>
+      <li>Packages without shipping mark will be rejected by the courier company</li>
+      <li>Breakable goods must strictly have the following: have solid box, written fragile articles, wooden Pallet/Crates.</li>
+    </ol>
+    <div style="margin-top: 6px;">The company will not be liable to any broken item or goods without a solid or wooden package</div>
+    <div style="margin-top: 8px;">Should you have any questions concerning this invoice, use the following contact information:</div>
+    <div style="margin-top: 4px;">0552161900/0549009957</div>
+    <div style="margin-top: 8px; font-weight: 500;">Thank you for your business!</div>
+
+    <div class="note-strong">NOTE: All CBM falling below the CBM rate 0.05 will be charged a fixed amount of $10.00</div>
+    
+    <div class="breakdown">INVOICE BREAKDOWN</div>
+    <div style="white-space: pre-line; margin-top: 6px; font-size: 11px;">{{ shipping_mark }}</div>
+  </div>
+
+</body>
+</html>
