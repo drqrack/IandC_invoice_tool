@@ -1,3 +1,18 @@
 .venv
 __pycache__
-dist    
+dist
+
+# Build artifacts
+build/
+*.spec
+
+# Data files (Input/Output)
+*.zip
+*.xlsx
+*.csv
+*.pdf
+IC_OUTPUT_*
+
+# System/Misc
+.abacus.donotdelete
+Microsoft.OutlookForWindows*
