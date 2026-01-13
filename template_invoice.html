@@ -142,7 +142,24 @@
     <div class="note-strong">NOTE: All CBM falling below the CBM rate 0.05 will be charged a fixed amount of $10.00</div>
     
     <div class="breakdown">INVOICE BREAKDOWN</div>
-    <div style="white-space: pre-line; margin-top: 6px; font-size: 11px;">{{ shipping_mark }}</div>
+    {% if breakdown_items and breakdown_items|length > 1 %}
+      <table style="margin-top: 8px;">
+        <tr>
+          <th>Tracking Number</th>
+          <th class="right">Qty</th>
+          <th class="right">CBM</th>
+        </tr>
+        {% for item in breakdown_items %}
+        <tr>
+          <td>{{ item.tracking_number }}</td>
+          <td class="right">{{ item.quantity }}</td>
+          <td class="right">{{ item.cbm }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <div style="white-space: pre-line; margin-top: 6px; font-size: 11px;">{{ shipping_mark }}</div>
+    {% endif %}
   </div>
 
 </body>

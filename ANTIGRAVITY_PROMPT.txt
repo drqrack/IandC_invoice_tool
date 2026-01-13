@@ -1,0 +1,210 @@
+# INVOICE BREAKDOWN FORMAT UPDATE
+
+## OBJECTIVE
+Update the invoice generation system to display a detailed breakdown table for customers with multiple tracking numbers. Currently, the "INVOICE BREAKDOWN" section only shows tracking numbers as text. It should display a formatted table with tracking numbers, quantities, and CBM values for each shipment.
+
+## CURRENT BEHAVIOR
+The invoice currently shows:
+```
+INVOICE BREAKDOWN
+956800863
+BBB00G13465
+IW4188041130337
+92781734931
+```
+
+## DESIRED BEHAVIOR (Based on DUNYO.pdf)
+The invoice should display a table like this:
+```
+INVOICE BREAKDOWN
+| 956800863       | 2  | 0.14 |
+| BBB00G13465     | 2  | 0.12 |
+| IW4188041130337 | 2  | 0.20 |
+| 92781734931     | 4  | 0.42 |
+```
+
+Where:
+- Column 1: Tracking Number (shipping mark)
+- Column 2: Quantity (number of cartons/packages)
+- Column 3: CBM (volume for that tracking number)
+
+---
+
+## FILES TO MODIFY
+
+### 1. app.py
+
+#### Changes Needed:
+
+**A. Update the Bill dataclass (around line 38)**
+
+Add a new field to store the breakdown information:
+
+```python
+@dataclass
+class Bill:
+    shipping_mark: str
+    customer_id: Optional[str]
+    customer_name: str
+    phone: str
+    location: str
+    total_cbm: float
+    rate_usd_per_cbm: float
+    other_cost_usd: float
+    item_description: str
+    breakdown_items: List[Dict[str, Any]] = None  # ADD THIS LINE
+```
+
+Initialize it with a default factory:
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class Bill:
+    # ... existing fields ...
+    breakdown_items: List[Dict[str, Any]] = field(default_factory=list)  # ADD THIS
+```
+
+**B. Update the build_bills function (around line 133)**
+
+Modify the grouped loop to collect breakdown information for each tracking number:
+
+Find this section in the `for key, g in grouped:` loop (around line 150):
+
+```python
+for key, g in grouped:
+    marks = sorted(set([str(x) for x in g["ShippingMark"].dropna().tolist() if str(x).strip()]))
+    shipping_mark = ", ".join(marks) if marks else "NO_SHIPPING_MARK"
+```
+
+After the `shipping_mark` line, ADD the breakdown collection logic:
+
+```python
+    # Build breakdown items: one entry per unique shipping mark
+    breakdown_items = []
+    for mark in marks:
+        mark_rows = g[g["ShippingMark"] == mark]
+        mark_cbm = float(mark_rows["E_cbm"].sum())
+        mark_count = len(mark_rows)  # Number of rows/cartons for this mark
+        
+        breakdown_items.append({
+            "tracking_number": mark,
+            "quantity": mark_count,
+            "cbm": round(mark_cbm, 2)
+        })
+```
+
+Then update the Bill instantiation to include breakdown_items:
+
+```python
+    bills.append(Bill(
+        shipping_mark=shipping_mark,
+        customer_id=customer_id,
+        customer_name=name,
+        phone=phone,
+        location=location_default,
+        total_cbm=round(total_cbm, 3),
+        rate_usd_per_cbm=rate_usd_per_cbm,
+        other_cost_usd=other_cost_usd,
+        item_description=item_desc,
+        breakdown_items=breakdown_items  # ADD THIS LINE
+    ))
+```
+
+**C. Update render_pdf_for_bill function (around line 170)**
+
+Pass the breakdown_items to the template:
+
+Find this line in the Template render call:
+```python
+    html = Template(template_html).render(
+        invoice_no=invoice_no,
+        invoice_date=invoice_date,
+        customer_name=bill.customer_name,
+        location=bill.location,
+        phone=bill.phone,
+        item_description=bill.item_description,
+        rate_usd_str=money_usd(bill.rate_usd_per_cbm),
+        cbm_str=f"{bill.total_cbm:.2f}",
+        payment_details=payment_details,
+        subtotal_usd_str=money_usd(bill.subtotal_usd if bill.total_cbm >= 0.05 else 10.0),
+        other_cost_usd_str=money_usd(bill.other_cost_usd),
+        total_usd_str=money_usd(bill.total_usd),
+        shipping_mark=bill.shipping_mark.replace(", ", "\n"),
+        breakdown_items=bill.breakdown_items  # ADD THIS LINE
+    )
+```
+
+---
+
+### 2. template_invoice.html
+
+#### Changes Needed:
+
+**Replace the current breakdown section**
+
+Find this section near the end (around line 115):
+
+```html
+<div class="breakdown">INVOICE BREAKDOWN</div>
+<!-- <div>{{ shipping_mark }}</div> -->
+<div style="white-space: pre-line;">{{ shipping_mark }}</div>
+```
+
+**Replace it with:**
+
+```html
+<div class="breakdown">INVOICE BREAKDOWN</div>
+{% if breakdown_items and breakdown_items|length > 1 %}
+  <table style="margin-top: 8px; width: auto; min-width: 400px;">
+    <tr>
+      <th style="text-align: left;">Tracking Number</th>
+      <th style="text-align: center;">Qty</th>
+      <th style="text-align: center;">CBM</th>
+    </tr>
+    {% for item in breakdown_items %}
+    <tr>
+      <td>{{ item.tracking_number }}</td>
+      <td style="text-align: center;">{{ item.quantity }}</td>
+      <td style="text-align: center;">{{ item.cbm }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+{% else %}
+  <div style="white-space: pre-line;">{{ shipping_mark }}</div>
+{% endif %}
+```
+
+**Explanation:**
+- If there are multiple tracking numbers (breakdown_items has more than 1 entry), display a table
+- Each row shows: tracking number, quantity, and CBM
+- If there's only one tracking number, fall back to the simple text display
+- The table styling matches the existing invoice table style
+
+---
+
+## TESTING
+
+After making these changes:
+
+1. Run the app with an Excel file that contains customers with multiple tracking numbers
+2. Check the generated PDF invoices
+3. Verify that the "INVOICE BREAKDOWN" section shows:
+   - A table format for customers with multiple tracking numbers
+   - Each row displays: tracking number | quantity | CBM
+   - The CBM values for each row should sum to the total CBM shown above
+
+## SUMMARY OF CHANGES
+
+**app.py:**
+- Add `breakdown_items` field to Bill dataclass with type `List[Dict[str, Any]]`
+- In `build_bills()`, collect breakdown data for each tracking number (quantity and CBM)
+- Pass `breakdown_items` to the template in `render_pdf_for_bill()`
+
+**template_invoice.html:**
+- Replace the simple text display with a conditional table
+- Display tracking number, quantity, and CBM columns
+- Use Jinja2 loop to iterate through breakdown_items
+- Fallback to simple text for single tracking numbers
+
+This will make invoices match the format shown in DUNYO.pdf for customers with multiple shipments.

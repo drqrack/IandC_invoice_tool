@@ -4,7 +4,7 @@ import math
 import csv
 import uuid
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -93,6 +93,7 @@ class Bill:
 
     other_cost_usd: float
     item_description: str
+    breakdown_items: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def subtotal_usd(self) -> float:
@@ -190,6 +191,31 @@ def build_bills(df: pd.DataFrame,
 
         total_cbm = float(g["E_cbm"].sum())
 
+        # Build breakdown items: one entry per unique shipping mark
+        breakdown_items = []
+        for mark in marks:
+            mark_rows = g[g["ShippingMark"] == mark]
+            mark_cbm = float(mark_rows["E_cbm"].sum())
+            # Sum quantity by parsing column D
+            mark_qty = 0
+            for misc_curr in mark_rows["D_misc"].dropna().astype(str):
+                parsed = parse_item_description(misc_curr)
+                # Try to extract number from parsed string; default to 1 if row exists
+                # parse_item_description returns e.g. "10 CARTONS"
+                # We can re-use the regex logic briefly here or trust the row count if D is empty?
+                # Actually, better to use the same logic as aggregate item_desc:
+                match_q = re.search(r'(\d+)', parsed)
+                if match_q:
+                    mark_qty += int(match_q.group(1))
+                else:
+                    mark_qty += 1
+            
+            breakdown_items.append({
+                "tracking_number": mark,
+                "quantity": mark_qty,
+                "cbm": round(mark_cbm, 2)
+            })
+
         # Build item description: use column D (D_misc) which contains quantity/pallet info
         items_d = [x for x in g["D_misc"].dropna().astype(str).tolist() if x.strip()]
         
@@ -232,7 +258,8 @@ def build_bills(df: pd.DataFrame,
             rate_usd_per_cbm=rate_usd_per_cbm,
 
             other_cost_usd=other_cost_usd,
-            item_description=item_desc
+            item_description=item_desc,
+            breakdown_items=breakdown_items
         ))
 
     # Stable sort for nice outputs
@@ -265,6 +292,7 @@ def render_pdf_for_bill(bill: Bill, template_html: str, out_path: Path,
         total_usd_str=money_usd(bill.total_usd),
         # shipping_mark=bill.shipping_mark,
         shipping_mark=bill.shipping_mark.replace(", ", "\n"),
+        breakdown_items=bill.breakdown_items
 
     )
 
