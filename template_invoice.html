@@ -61,11 +61,11 @@
         <img src="logo.png" alt="I&C Logo" style="max-height: 120px; width: auto;">
       </div>
       <div class="right">
-        18878705606
+        19878765606
       </div>
     </div>
     <div class="sub">
-      广东省佛山市南海区里水镇北沙村石龙潭工业区9号加纳仓<br>
+      广东省佛山市南海区里水镇甘蕉上街工业区金辉工业园15号楼一楼  刘先生<br>
       I&amp;C LOGISTICS GOODS BILL
     </div>
   </div>
@@ -95,7 +95,7 @@
 
   <table>
     <tr>
-      <th>ITEM DESCRIBTION</th>
+      <th>ITEM DESCRIPTION</th>
       <th class="right">TOTAL CBM</th>
     </tr>
     <tr>
@@ -139,26 +139,25 @@
     <div style="margin-top: 4px;">0552161900/0549009957</div>
     <div style="margin-top: 8px; font-weight: 500;">Thank you for your business!</div>
 
-    <div class="note-strong">NOTE: All CBM falling below the CBM rate 0.05 will be charged a fixed amount of $10.00</div>
+
     
     <div class="breakdown">INVOICE BREAKDOWN</div>
     {% if breakdown_items and breakdown_items|length > 1 %}
-      <table style="margin-top: 8px;">
-        <tr>
-          <th>Tracking Number</th>
-          <th class="right">Qty</th>
-          <th class="right">CBM</th>
-        </tr>
+      <!-- Multiple shipments: show table WITHOUT headers (matching DUNYO.pdf) -->
+      <table style="margin-top: 8px; border: none;">
         {% for item in breakdown_items %}
         <tr>
-          <td>{{ item.tracking_number }}</td>
-          <td class="right">{{ item.quantity }}</td>
-          <td class="right">{{ item.cbm }}</td>
+          <td style="border: 1px solid #ddd;">{{ item.tracking_number }}</td>
+          <td class="right" style="border: 1px solid #ddd;">{{ item.quantity }}</td>
+          <td class="right" style="border: 1px solid #ddd;">{{ item.cbm }}</td>
         </tr>
         {% endfor %}
       </table>
     {% else %}
-      <div style="white-space: pre-line; margin-top: 6px; font-size: 11px;">{{ shipping_mark }}</div>
+      <!-- Single shipment: show tracking number as plain text (matching CHRISTIAN_new.pdf) -->
+      <div style="margin-top: 6px; font-size: 11px; font-weight: normal;">
+        {{ breakdown_items[0].tracking_number if breakdown_items else shipping_mark }}
+      </div>
     {% endif %}
   </div>
 

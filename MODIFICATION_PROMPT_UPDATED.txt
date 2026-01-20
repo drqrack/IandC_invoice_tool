@@ -1,0 +1,437 @@
+================================================================================
+COMPREHENSIVE MODIFICATION PROMPT FOR INVOICE GENERATOR APPLICATION
+================================================================================
+
+OVERVIEW:
+--------
+This prompt provides detailed instructions to modify an existing invoice generator 
+application (app.py and template_invoice.html) to work with a new Excel data format
+and generate invoices in two different styles based on the number of shipments per 
+customer.
+
+CURRENT vs NEW DATA STRUCTURE:
+------------------------------
+
+OLD Excel Format (Previous):
+- Column A: Customer ID (sometimes contains container header info)
+- Column B: Shipping Mark / Tracking Number
+- Column C: Combined "Phone Name Location" field (e.g., "0202425612 BLESSING KUMASI")
+- Column D: Misc quantity info (e.g., "1pallet", "10", "1")
+- Column E: CBM (Cubic Meter volume)
+- Column F: Item description
+
+NEW Excel Format (Required - N005-N006_CONTAINER_LIST_new.xlsx):
+- Excel has TWO header rows:
+  * Row 0: Empty row
+  * Row 1: Container info (e.g., "28th/Sep 2025--N006=MSBU8308501")
+  * Row 2: Container info (e.g., "28th/Sep 2025--N005=MSDU5985548")
+  * Row 3: ACTUAL DATA HEADERS (0-indexed row 3)
+- Data headers in row 3 (0-indexed):
+  * INVOICE N0. - Invoice number (may be NaN for some rows, stored as float)
+  * TRACKING N0. - Shipping tracking number (e.g., "dpk364835626133", "JT3134909082633")
+  * CONTACT - Customer phone number identifier (stored as object/string, e.g., "61466818614", "200485487")
+  * CUSTOMER NAME - Customer name (e.g., "DANIEL", "DEBOARH", "BLESSING") - may be NaN
+  * LOCATION - Destination (e.g., "ACCRA", "KUMASI", "TAKORADI", "TAMALE") - sparse data
+  * QTY PER TRACKING - Quantity per tracking (e.g., "1pallet", "1", "4") - stored as object
+  * CBM PER TRACKING - Cubic Meter volume per tracking (float, e.g., 0.66, 0.02, 1.31)
+  * PRODUCT DESCRIPTION - Product description (e.g., "1 pallet of tv") - mostly NaN
+  * KG - Weight in kilograms (float, all values are NaN in sample data)
+  * OTHER - Additional notes (float, all values are NaN in sample data)
+  * RECEIVING DATE - Date received (datetime64, e.g., "2025-09-22 00:00:00")
+  * Unnamed: 11 - Contains additional info (e.g., "5,1.51", "2, 0.04", "10, 0.2")
+  * Unnamed: 12 - Contains "N005+N006" marker for all rows
+  * Unnamed: 13 - Empty (all NaN)
+  * Unnamed: 14 - Empty (all NaN)
+
+IMPORTANT DATA CHARACTERISTICS:
+- Total data rows: 977 (after header row 3)
+- Header row location: Row 3 (0-indexed)
+- CONTACT column: Already formatted as string (e.g., "61466818614", "200485487")
+- CUSTOMER NAME: Only 228 non-null values out of 977 rows (sparse)
+- LOCATION: Only 16 non-null values out of 977 rows (very sparse - needs default)
+- TRACKING N0.: 971 non-null values (primary identifier)
+- CBM PER TRACKING: 975 non-null values (reliable numeric data)
+- QTY PER TRACKING: 975 non-null values (stored as object, needs parsing)
+
+INVOICE FORMAT REQUIREMENTS:
+----------------------------
+
+There are TWO different invoice formats based on the number of shipments per customer:
+
+FORMAT 1: SINGLE BREAKDOWN (Reference: CHRISTIAN_new.pdf)
+- Used when a customer has ONLY ONE shipment (one tracking number)
+- Invoice breakdown section shows:
+  * Title: "INVOICE BREAKDOWN"
+  * Single tracking number displayed as plain text (e.g., "S70429396520")
+  * No table structure needed
+
+FORMAT 2: MULTIPLE BREAKDOWN (Reference: DUNYO.pdf)
+- Used when a customer has MULTIPLE shipments (multiple tracking numbers)
+- Invoice breakdown section shows:
+  * Title: "INVOICE BREAKDOWN"
+  * Table with 3 columns (NO headers visible in the PDF):
+    - Column 1: Tracking Number (e.g., "956800863", "BBB00G13465")
+    - Column 2: Quantity/Number of cartons (e.g., 2, 4)
+    - Column 3: CBM for that shipment (e.g., 0.14, 0.42)
+
+Common Invoice Elements (Both Formats):
+- Header: "J&C CARGO" (or "I&C CARGO") with phone number "18878705606"
+- Invoice number format: "NO.1C2025006070" (pattern: 1C + YEAR + random digits)
+- Date format: "28TH NOVEMBER, 2025" (day with suffix + MONTH + year)
+- Bill To section:
+  * Customer name (from CUSTOMER NAME column)
+  * Location (from LOCATION column, default to "ACCRA GHANA" if NaN)
+  * Contact/Phone (from CONTACT column)
+- For: "SEA CARGO"
+- Main table with:
+  * ITEM DESCRIPTION: Based on PRODUCT DESCRIPTION (e.g., "3 CARTONS OF PERSONAL USE")
+  * TOTAL CBM: Shows rate per CBM (e.g., "$235.00")
+  * TOTAL CBM: Shows total CBM (e.g., "CBM 0.25")
+  * PAYMENT DETAILS: Shows calculation (e.g., "235*0.25")
+  * Subtotal: Calculated amount (e.g., "$59.00")
+  * OTHER COST: Additional costs (e.g., "$0.00")
+  * Total Cost: Final amount (e.g., "$59.00")
+- Terms and conditions (numbered list 1-5)
+- Note about minimum CBM charge
+- Footer: "INVOICE BREAKDOWN" section
+
+DETAILED MODIFICATIONS REQUIRED:
+================================
+
+1. MODIFY app.py - load_and_prepare_rows() function:
+   ------------------------------------------------
+
+   CURRENT BEHAVIOR:
+   - Reads Excel with header=None
+   - Removes container header lines from column A
+   - Maps columns to A-F with custom names
+   - Parses phone/name from combined column C
+
+   NEW REQUIRED BEHAVIOR:
+   - Read Excel with header=3 (skip first 3 rows: empty, container info 1, container info 2; use row 3 as headers)
+   - Column mapping:
+     * INVOICE N0. -> invoice_no (float, may be NaN)
+     * TRACKING N0. -> tracking_no (string)
+     * CONTACT -> contact (customer identifier - already formatted as string)
+     * CUSTOMER NAME -> customer_name (string, may be NaN - sparse data)
+     * LOCATION -> location (string, may be NaN - very sparse, needs default)
+     * QTY PER TRACKING -> qty_per_tracking (object, needs parsing)
+     * CBM PER TRACKING -> cbm (float)
+     * PRODUCT DESCRIPTION -> product_description (string, mostly NaN)
+     * KG -> weight_kg (float, all NaN)
+     * OTHER -> other_notes (float, all NaN)
+     * RECEIVING DATE -> receiving_date (datetime)
+   - NO phone/name parsing needed (they're already separate)
+   - Keep only rows where TRACKING N0. is not NaN
+   - CONTACT is already a string, no conversion needed
+   - Ensure CBM PER TRACKING is numeric (pd.to_numeric with errors='coerce')
+   - Handle sparse CUSTOMER NAME and LOCATION data with appropriate defaults
+   
+   PSEUDO CODE:
+   ```python
+   def load_and_prepare_rows(excel_path: Path) -> pd.DataFrame:
+       # Read with header row 3 (0-indexed)
+       # Rows 0-2 contain: empty row, container info 1, container info 2
+       df = pd.read_excel(excel_path, sheet_name=0, header=3)
+       
+       # Filter: keep only rows with tracking numbers
+       df = df[df['TRACKING N0.'].notna()].copy()
+       
+       # Rename columns for consistency (remove spaces and special characters)
+       df.rename(columns={
+           'INVOICE N0.': 'INVOICE_NO',
+           'TRACKING N0.': 'TRACKING_NO',
+           'CUSTOMER NAME': 'CUSTOMER_NAME',
+           'QTY PER TRACKING': 'QTY_PER_TRACKING',
+           'CBM PER TRACKING': 'CBM',
+           'PRODUCT DESCRIPTION': 'PRODUCT_DESCRIPTION',
+           'RECEIVING DATE': 'RECEIVING_DATE'
+       }, inplace=True)
+       
+       # CONTACT is already a string, no conversion needed
+       # Handle NaN values with defaults
+       df['CONTACT'] = df['CONTACT'].fillna('UNKNOWN')
+       df['CUSTOMER_NAME'] = df['CUSTOMER_NAME'].fillna('UNKNOWN')
+       df['LOCATION'] = df['LOCATION'].fillna('ACCRA GHANA')
+       
+       # Ensure CBM is numeric
+       df['CBM'] = pd.to_numeric(df['CBM'], errors='coerce').fillna(0.0)
+       
+       # Parse QTY_PER_TRACKING (e.g., "1pallet" -> 1, "4" -> 4)
+       def parse_qty(qty_str):
+           if pd.isna(qty_str):
+               return 1
+           qty_str = str(qty_str).strip().lower()
+           # Extract numeric part
+           import re
+           match = re.search(r'\d+', qty_str)
+           return int(match.group()) if match else 1
+       
+       df['QTY'] = df['QTY_PER_TRACKING'].apply(parse_qty)
+       
+       # Keep necessary columns
+       work = df[['CONTACT', 'CUSTOMER_NAME', 'LOCATION', 'TRACKING_NO', 'CBM', 
+                  'PRODUCT_DESCRIPTION', 'INVOICE_NO', 'QTY', 'RECEIVING_DATE']].copy()
+       
+       return work
+   ```
+
+2. MODIFY app.py - build_bills() function:
+   ----------------------------------------
+
+   CURRENT BEHAVIOR:
+   - Groups by phone/name/customer_id with complex fallback logic
+   - Builds item description from column D (quantity) + column F (item type)
+   - Creates breakdown items per shipping mark
+
+   NEW REQUIRED BEHAVIOR:
+   - Group by CONTACT column (this is the customer identifier)
+   - Use CUSTOMER_NAME directly (already separate, no parsing needed)
+   - Use LOCATION directly (already filled with default "ACCRA GHANA" for NaN values)
+   - Build item description from PRODUCT_DESCRIPTION column (fallback to "PERSONAL USE" if NaN)
+   - Calculate total CBM per customer (sum of all their shipments)
+   - Create breakdown items: one per TRACKING N0. with its CBM and parsed quantity
+   - For quantity in breakdown: use parsed QTY column
+
+   KEY CHANGES:
+   ```python
+   def build_bills(df: pd.DataFrame,
+                   rate_usd_per_cbm: float,
+                   other_cost_usd: float,
+                   location_default: str = "ACCRA GHANA") -> List[Bill]:
+       
+       bills: List[Bill] = []
+       
+       # Group by CONTACT (customer phone number identifier)
+       grouped = df.groupby('CONTACT', dropna=False)
+       
+       for contact, g in grouped:
+           # Customer info (direct from columns, no parsing)
+           customer_name = g['CUSTOMER_NAME'].iloc[0] if pd.notna(g['CUSTOMER_NAME'].iloc[0]) else "UNKNOWN"
+           location = g['LOCATION'].iloc[0] if pd.notna(g['LOCATION'].iloc[0]) else location_default
+           phone = str(contact)  # CONTACT is the phone number
+           
+           # Total CBM for this customer
+           total_cbm = float(g['CBM'].sum())
+           
+           # Build breakdown items: one per tracking number
+           breakdown_items = []
+           for idx, row in g.iterrows():
+               tracking = str(row['TRACKING_NO']) if pd.notna(row['TRACKING_NO']) else "NO_TRACKING"
+               cbm = float(row['CBM']) if pd.notna(row['CBM']) else 0.0
+               qty = int(row['QTY']) if pd.notna(row['QTY']) else 1
+               
+               breakdown_items.append({
+                   "tracking_number": tracking,
+                   "quantity": qty,
+                   "cbm": round(cbm, 2)
+               })
+           
+           # Build item description from PRODUCT_DESCRIPTION
+           product_descriptions = g['PRODUCT_DESCRIPTION'].dropna().unique().tolist()
+           if product_descriptions:
+               # Count total items
+               num_items = len(g)
+               unit = "CARTON" if num_items == 1 else "CARTONS"
+               
+               # Use first product description or combine multiple
+               if len(product_descriptions) == 1:
+                   item_desc = f"{num_items} {unit} OF {product_descriptions[0]}"
+               else:
+                   # Multiple product descriptions - use generic "PERSONAL USE"
+                   item_desc = f"{num_items} {unit} OF PERSONAL USE"
+           else:
+               # No product description - use generic
+               num_items = len(g)
+               unit = "CARTON" if num_items == 1 else "CARTONS"
+               item_desc = f"{num_items} {unit} OF PERSONAL USE"
+           
+           # Combine all tracking numbers for shipping_mark field
+           tracking_numbers = [str(x) for x in g['TRACKING_NO'].dropna().tolist()]
+           shipping_mark = ", ".join(tracking_numbers) if tracking_numbers else "NO_TRACKING"
+           
+           bills.append(Bill(
+               shipping_mark=shipping_mark,
+               customer_id=phone,  # Use phone as customer ID
+               customer_name=customer_name,
+               phone=phone,
+               location=location,
+               total_cbm=round(total_cbm, 3),
+               rate_usd_per_cbm=rate_usd_per_cbm,
+               other_cost_usd=other_cost_usd,
+               item_description=item_desc,
+               breakdown_items=breakdown_items
+           ))
+       
+       # Sort for consistent output
+       bills.sort(key=lambda b: (b.customer_name or "", b.phone or ""))
+       return bills
+   ```
+
+3. MODIFY template_invoice.html - Breakdown Section:
+   -------------------------------------------------
+
+   CURRENT BEHAVIOR:
+   - Has conditional logic: if breakdown_items length > 1, show table
+   - Otherwise show shipping_mark as text with newlines
+
+   NEW REQUIRED BEHAVIOR:
+   - Same logic, but with better styling to match the PDF samples
+   - For single breakdown: show tracking number in simple text format
+   - For multiple breakdown: show table WITHOUT headers (matching DUNYO.pdf)
+
+   SPECIFIC CHANGES:
+   
+   Current code in template (around line 115-135):
+   ```html
+   <div class="breakdown">INVOICE BREAKDOWN</div>
+   {% if breakdown_items and breakdown_items|length > 1 %}
+     <table style="margin-top: 8px;">
+       <tr>
+         <th>Tracking Number</th>
+         <th class="right">Qty</th>
+         <th class="right">CBM</th>
+       </tr>
+       {% for item in breakdown_items %}
+       <tr>
+         <td>{{ item.tracking_number }}</td>
+         <td class="right">{{ item.quantity }}</td>
+         <td class="right">{{ item.cbm }}</td>
+       </tr>
+       {% endfor %}
+     </table>
+   {% else %}
+     <div style="white-space: pre-line; margin-top: 6px; font-size: 11px;">{{ shipping_mark }}</div>
+   {% endif %}
+   ```
+
+   MODIFY TO:
+   ```html
+   <div class="breakdown">INVOICE BREAKDOWN</div>
+   {% if breakdown_items and breakdown_items|length > 1 %}
+     <!-- Multiple shipments: show table WITHOUT headers (matching DUNYO.pdf) -->
+     <table style="margin-top: 8px; border: none;">
+       {% for item in breakdown_items %}
+       <tr>
+         <td style="border: 1px solid #ddd;">{{ item.tracking_number }}</td>
+         <td class="right" style="border: 1px solid #ddd;">{{ item.quantity }}</td>
+         <td class="right" style="border: 1px solid #ddd;">{{ item.cbm }}</td>
+       </tr>
+       {% endfor %}
+     </table>
+   {% else %}
+     <!-- Single shipment: show tracking number as plain text (matching CHRISTIAN_new.pdf) -->
+     <div style="margin-top: 6px; font-size: 11px; font-weight: normal;">
+       {{ breakdown_items[0].tracking_number if breakdown_items else shipping_mark }}
+     </div>
+   {% endif %}
+   ```
+
+4. ADDITIONAL CONSIDERATIONS:
+   --------------------------
+
+   A. Column Name Handling:
+      - Column names in new file: 'INVOICE N0.', 'TRACKING N0.', 'CBM PER TRACKING', etc.
+      - Use df.columns.tolist() to see exact column names
+      - Use .rename() to clean them up for easier handling
+
+   B. Data Type Conversions:
+      - CONTACT: Already stored as string (e.g., "61466818614"), no conversion needed
+      - CBM PER TRACKING: Ensure it's float with pd.to_numeric()
+      - TRACKING N0.: Convert to string for display
+      - QTY PER TRACKING: Parse to extract numeric value (e.g., "1pallet" -> 1)
+
+   C. Grouping Logic:
+      - Group by CONTACT column only (this is the unique customer identifier)
+      - Each group will have 1 or more tracking numbers
+      - Sum CBM across all rows in the group
+
+   D. Item Description Logic:
+      - Use PRODUCT DESCRIPTION column for description
+      - If NaN or multiple different products, use generic "PERSONAL USE"
+      - Count number of rows (shipments) for quantity
+      - Format: "{count} CARTON/CARTONS OF {product_description}"
+
+   E. Breakdown Display Logic:
+      - If len(breakdown_items) == 1: Show single tracking number as text
+      - If len(breakdown_items) > 1: Show table with tracking, qty, CBM
+      - Table should NOT have headers (matching DUNYO.pdf format)
+
+   F. Error Handling:
+      - Handle NaN values in PRODUCT DESCRIPTION (fallback to "PERSONAL USE")
+      - Handle NaN values in LOCATION (fallback to "ACCRA GHANA")
+      - Handle NaN values in CUSTOMER NAME (fallback to "UNKNOWN")
+      - Handle sparse data: only 228 out of 977 rows have CUSTOMER NAME
+      - Handle sparse data: only 16 out of 977 rows have LOCATION
+
+5. TESTING CHECKLIST:
+   ------------------
+
+   After modifications, verify:
+   
+   □ Excel file loads correctly with new column structure (header at row 3)
+   □ Customer grouping works by CONTACT column
+   □ Customer names display correctly (from CUSTOMER NAME column, with "UNKNOWN" fallback)
+   □ Locations display correctly (from LOCATION column, with "ACCRA GHANA" fallback)
+   □ Phone numbers display correctly (CONTACT column already formatted as string)
+   □ Total CBM calculated correctly per customer (sum of all their shipments)
+   □ Item descriptions use PRODUCT DESCRIPTION column (with "PERSONAL USE" fallback)
+   □ Quantity parsing works for QTY PER TRACKING (e.g., "1pallet" -> 1, "4" -> 4)
+   □ Single shipment invoices show tracking number as plain text
+   □ Multiple shipment invoices show table without headers
+   □ Breakdown table has correct columns: tracking number, quantity, CBM
+   □ All calculations (subtotal, total) work correctly
+   □ PDF generation completes without errors
+   □ Output filenames use customer name and phone number
+
+6. SAMPLE DATA FOR TESTING:
+   ------------------------
+
+   Customer with SINGLE shipment (should use CHRISTIAN_new.pdf format):
+   - CONTACT: "200485487"
+   - CUSTOMER NAME: "DANIEL"
+   - LOCATION: "KUMASI"
+   - TRACKING N0.: "JT3134909082633"
+   - CBM PER TRACKING: 0.02
+   - QTY PER TRACKING: "1"
+   - PRODUCT DESCRIPTION: NaN
+   
+   Expected invoice breakdown: Shows "JT3134909082633" as plain text
+
+   Customer with MULTIPLE shipments (should use DUNYO.pdf format):
+   - CONTACT: "200919812"
+   - CUSTOMER NAME: NaN (will show "UNKNOWN")
+   - LOCATION: "TAKORADI" (first occurrence), "TAMALE" (second occurrence)
+   - Multiple rows with different tracking numbers and CBMs:
+     * Row 1: TRACKING N0. "300627242049", CBM 0.2, QTY "1"
+     * Row 2: TRACKING N0. "760195166021 760195166412 760195164461 760195160590", CBM 1.31, QTY "4"
+   
+   Expected invoice breakdown: Table with columns for tracking, qty, CBM (no headers)
+
+7. COMMON PITFALLS TO AVOID:
+   -------------------------
+
+   ✗ Don't use header=None or header=1 when reading Excel (use header=3)
+   ✗ Don't parse phone from combined field (use CONTACT column directly)
+   ✗ Don't assume all rows have CUSTOMER NAME (only 228/977 have it - use "UNKNOWN" default)
+   ✗ Don't assume all rows have LOCATION (only 16/977 have it - use "ACCRA GHANA" default)
+   ✗ Don't use PRODUCT DESCRIPTION without NaN handling (mostly NaN - use "PERSONAL USE" fallback)
+   ✗ Don't show table headers in multiple breakdown format
+   ✗ Don't forget to parse QTY PER TRACKING (it's stored as object like "1pallet", "4")
+   ✗ Don't try to convert CONTACT to int/float (it's already a string)
+
+8. FINAL NOTES:
+   -----------
+
+   - The template_invoice.html already has most of the structure needed
+   - Main changes are in app.py data loading and processing logic
+   - The conditional display logic in template is already good, just needs minor styling tweaks
+   - Make sure logo.png file is in the same directory as the script
+   - Test with the actual "N005-N006_CONTAINER_LIST_new.xlsx" file provided
+   - Generated PDFs should match the style of CHRISTIAN_new.pdf and DUNYO.pdf samples
+   - Be aware of sparse data: CUSTOMER NAME and LOCATION have many NaN values
+   - Handle grouping carefully: some customers may have multiple shipments to different locations
+
+================================================================================
+END OF MODIFICATION PROMPT
+================================================================================

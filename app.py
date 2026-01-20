@@ -101,15 +101,11 @@ class Bill:
 
     @property
     def min_charge_usd(self) -> float:
-        # As per NOTE in PDF: below 0.05 CBM => $10 fixed
-        return 10.0 if self.total_cbm < 0.05 else 0.0
+        return 0.0
 
     @property
     def total_usd(self) -> float:
-        base = self.subtotal_usd
-        if self.total_cbm < 0.05:
-            base = 10.0
-        return base + self.other_cost_usd
+        return self.subtotal_usd + self.other_cost_usd
 
 
 
@@ -119,151 +115,166 @@ class Bill:
 # =========================
 
 def load_and_prepare_rows(excel_path: Path) -> pd.DataFrame:
-    # Read first sheet, no header assumption
-    raw = pd.read_excel(excel_path, sheet_name=0, header=None)
+    # Read with header row 3 (0-indexed)
+    # Rows 0-2 contain: empty row, container info 1, container info 2
+    # So we use header=3
+    df = pd.read_excel(excel_path, sheet_name=0, header=3)
 
-    # Remove container header lines
-    mask_header = raw[0].apply(is_container_header_line)
-    raw = raw[~mask_header].copy()
+    # Filter: keep only rows with tracking numbers
+    # Column "TRACKING N0."
+    # If column names differ slightly (e.g. spaces), clean them first?
+    # Let's clean column names by stripping spaces just in case
+    df.columns = [str(c).strip() for c in df.columns]
 
-    # Keep rows where column B (index 1) exists (tracking/shipping mark)
-    raw = raw[raw[1].notna()].copy()
+    if "TRACKING N0." not in df.columns:
+        # Fallback or error?
+        pass
 
-    # Map columns A-F by your confirmed structure:
-    # A=0, B=1, C=2, D=3, E=4 (CBM), F=5 (item)
-    work = raw[[0, 1, 2, 3, 4, 5]].copy()
-    work.columns = ["A_customer_id", "B_shipping_mark", "C_name_phone", "D_misc", "E_cbm", "F_item"]
+    df = df[df['TRACKING N0.'].notna()].copy()
 
-    # Fill-down for continuation lines
-    work["A_customer_id"] = work["A_customer_id"].astype(object).ffill()
-    work["C_name_phone"] = work["C_name_phone"].astype(object).ffill()
+    # Column Mapping
+    # INVOICE N0. -> INVOICE_NO
+    # TRACKING N0. -> TRACKING_NO
+    # CONTACT -> CONTACT (already string-like?)
+    # CUSTOMER NAME -> CUSTOMER_NAME
+    # LOCATION -> LOCATION
+    # QTY PER TRACKING -> QTY_PER_TRACKING
+    # CBM PER TRACKING -> CBM
+    # PRODUCT DESCRIPTION -> PRODUCT_DESCRIPTION
+    # RECEIVING DATE -> RECEIVING_DATE
+    
+    rename_map = {
+        'INVOICE N0.': 'INVOICE_NO',
+        'TRACKING N0.': 'TRACKING_NO',
+        'CUSTOMER NAME': 'CUSTOMER_NAME',
+        'QTY PER TRACKING': 'QTY_PER_TRACKING',
+        'CBM PER TRACKING': 'CBM',
+        'PRODUCT DESCRIPTION': 'PRODUCT_DESCRIPTION',
+        'RECEIVING DATE': 'RECEIVING_DATE'
+    }
+    df.rename(columns=rename_map, inplace=True)
 
-    # Parse phone/name
-    parsed = work["C_name_phone"].apply(parse_phone_name)
-    work["Phone"] = parsed.apply(lambda x: x[0])
-    work["CustomerName"] = parsed.apply(lambda x: x[1])
+    # Ensure required columns exist
+    required_cols = ['CONTACT', 'CUSTOMER_NAME', 'LOCATION', 'TRACKING_NO', 'CBM', 
+                     'PRODUCT_DESCRIPTION', 'INVOICE_NO', 'QTY_PER_TRACKING', 'RECEIVING_DATE']
+    
+    for c in required_cols:
+        if c not in df.columns:
+            df[c] = None
 
-    # Normalize shipping mark
-    work["ShippingMark"] = work["B_shipping_mark"].apply(normalize_shipping_mark)
+    # Handle defaults / cleaning
+    df['CONTACT'] = df['CONTACT'].fillna('UNKNOWN').astype(str)
+    df['CUSTOMER_NAME'] = df['CUSTOMER_NAME'].fillna('UNKNOWN')
+    df['LOCATION'] = df['LOCATION'].fillna('ACCRA GHANA')
+    
+    # Ensure CBM is numeric
+    df['CBM'] = pd.to_numeric(df['CBM'], errors='coerce').fillna(0.0)
 
-    # Ensure CBM numeric
-    work["E_cbm"] = pd.to_numeric(work["E_cbm"], errors="coerce").fillna(0.0)
+    # Parse QTY_PER_TRACKING (e.g., "1pallet" -> 1, "4" -> 4)
+    def parse_qty(qty_str):
+        if pd.isna(qty_str):
+            return 1
+        qty_str = str(qty_str).strip().lower()
+        # Extract numeric part
+        import re
+        match = re.search(r'\d+', qty_str)
+        return int(match.group()) if match else 1
 
+    df['QTY'] = df['QTY_PER_TRACKING'].apply(parse_qty)
+
+    work = df[['CONTACT', 'CUSTOMER_NAME', 'LOCATION', 'TRACKING_NO', 'CBM', 
+               'PRODUCT_DESCRIPTION', 'INVOICE_NO', 'QTY', 'RECEIVING_DATE']].copy()
     return work
 
 
 def build_bills(df: pd.DataFrame,
                 rate_usd_per_cbm: float,
-
                 other_cost_usd: float,
                 location_default: str = "ACCRA GHANA") -> List[Bill]:
 
     bills: List[Bill] = []
 
-    # # Grouping rule: per shipping mark; fallback to phone if shipping mark missing
-    # df = df.copy()
-    # df["BillKey"] = df["ShippingMark"]
-    # df.loc[df["BillKey"].isna(), "BillKey"] = df["Phone"]
+    # Group by CONTACT (customer phone number identifier)
+    grouped = df.groupby('CONTACT', dropna=False)
 
-    # grouped = df.groupby("BillKey", dropna=False)
+    for contact, g in grouped:
+        # Customer info (direct from columns, no parsing)
+        # Handle cases where NAME might be inconsistent in the group (take first valid)
+        customer_name = g['CUSTOMER_NAME'].iloc[0] if g['CUSTOMER_NAME'].notna().any() and g['CUSTOMER_NAME'].iloc[0] != "UNKNOWN" else "UNKNOWN"
+        # If the first row was UNKNOWN but later rows had a name, we might miss it with .iloc[0] if we don't sort or filter?
+        # Better: find first non-UNKNOWN name
+        valid_names = [x for x in g['CUSTOMER_NAME'].unique() if x != "UNKNOWN"]
+        if valid_names:
+            customer_name = valid_names[0]
+            
+        location = g['LOCATION'].iloc[0] if g['LOCATION'].notna().any() else location_default
+        # Similar logic for location?
+        valid_locs = [x for x in g['LOCATION'].unique() if x != "ACCRA GHANA" and x is not None]
+        if valid_locs:
+            location = valid_locs[0]
+        else:
+             # Default is already set but just to be sure
+             if location == "ACCRA GHANA" or location is None:
+                 location = "ACCRA GHANA"
+        
+        phone = str(contact)
+        
+        # Total CBM for this customer
+        total_cbm = float(g['CBM'].sum())
 
-    # Grouping rule: per customer (combine multiple shipping marks)
-    df = df.copy()
-
-    # Primary key = phone (best identifier). Fallback to customer name, then customer id.
-    df["PhoneKey"] = df["Phone"].fillna("").astype(str).str.strip()
-    df["NameKey"] = df["CustomerName"].fillna("").astype(str).str.strip()
-
-    df["BillKey"] = df["PhoneKey"]
-    df.loc[df["BillKey"] == "", "BillKey"] = df["NameKey"]
-    df.loc[df["BillKey"] == "", "BillKey"] = df["A_customer_id"].astype(str).fillna("UNKNOWN")
-
-    grouped = df.groupby("BillKey", dropna=False)
-
-    for key, g in grouped:
-        # shipping_mark = str(g["ShippingMark"].dropna().iloc[0]) if g["ShippingMark"].notna().any() else "NO_SHIPPING_MARK"
-        marks = sorted(set([str(x) for x in g["ShippingMark"].dropna().tolist() if str(x).strip()]))
-        shipping_mark = ", ".join(marks) if marks else "NO_SHIPPING_MARK"
-        customer_id = str(g["A_customer_id"].iloc[0]) if pd.notna(g["A_customer_id"].iloc[0]) else None
-
-        phone = g["Phone"].dropna().astype(str).iloc[0] if g["Phone"].notna().any() else "NO_PHONE"
-        name = g["CustomerName"].dropna().astype(str).iloc[0] if g["CustomerName"].notna().any() else "UNKNOWN"
-
-        total_cbm = float(g["E_cbm"].sum())
-
-        # Build breakdown items: one entry per unique shipping mark
+        # Build breakdown items: one per tracking number
         breakdown_items = []
-        for mark in marks:
-            mark_rows = g[g["ShippingMark"] == mark]
-            mark_cbm = float(mark_rows["E_cbm"].sum())
-            # Sum quantity by parsing column D
-            mark_qty = 0
-            for misc_curr in mark_rows["D_misc"].dropna().astype(str):
-                parsed = parse_item_description(misc_curr)
-                # Try to extract number from parsed string; default to 1 if row exists
-                # parse_item_description returns e.g. "10 CARTONS"
-                # We can re-use the regex logic briefly here or trust the row count if D is empty?
-                # Actually, better to use the same logic as aggregate item_desc:
-                match_q = re.search(r'(\d+)', parsed)
-                if match_q:
-                    mark_qty += int(match_q.group(1))
-                else:
-                    mark_qty += 1
+        
+        for idx, row in g.iterrows():
+            tracking = str(row['TRACKING_NO']).strip() if pd.notna(row['TRACKING_NO']) else "NO_TRACKING"
+            cbm = float(row['CBM']) if pd.notna(row['CBM']) else 0.0
+            qty = int(row['QTY']) if pd.notna(row['QTY']) else 1
             
             breakdown_items.append({
-                "tracking_number": mark,
-                "quantity": mark_qty,
-                "cbm": round(mark_cbm, 2)
+                "tracking_number": tracking,
+                "quantity": qty,
+                "cbm": round(cbm, 2)
             })
 
-        # Build item description: use column D (D_misc) which contains quantity/pallet info
-        items_d = [x for x in g["D_misc"].dropna().astype(str).tolist() if x.strip()]
+        # Build item description from PRODUCT_DESCRIPTION
+        product_descs = [str(x).strip() for x in g['PRODUCT_DESCRIPTION'].dropna().unique().tolist() if str(x).strip()]
         
-        if items_d:
-            # Sum up all quantities and determine the most common unit type
-            total_qty = 0
-            has_pallet = False
-            
-            for item in items_d:
-                parsed = parse_item_description(item)
-                # Extract quantity from parsed string
-                qty_match = re.search(r'(\d+)', parsed)
-                if qty_match:
-                    total_qty += int(qty_match.group(1))
-                if 'PALLET' in parsed:
-                    has_pallet = True
-            
-            # Build final description
-            if has_pallet:
-                unit = 'PALLET' if total_qty == 1 else 'PALLETS'
+        # Count total items (sum of QTY)
+        # Note: Previous plan said "count number of rows", but prompt says "For quantity in breakdown: use parsed QTY column"
+        # And item desc says "Count number of rows (shipments) for quantity" in ONE part, but then "use parsed QTY" in another?
+        # Let's align with: Item Desc usually aggregates TOTAL PACKAGES.
+        # So we should sum breakdown quantities.
+        total_qty = sum(item['quantity'] for item in breakdown_items)
+        unit = "CARTON" if total_qty == 1 else "CARTONS"
+        
+        if product_descs:
+            if len(product_descs) == 1:
+                item_desc = f"{total_qty} {unit} OF {product_descs[0]}"
             else:
-                unit = 'CARTON' if total_qty == 1 else 'CARTONS'
-            
-            item_desc = f"{total_qty} {unit} OF PERSONAL USE"
+                 # Multiple product types
+                item_desc = f"{total_qty} {unit} OF PERSONAL USE"
         else:
-            # Fallback to column F if D is empty
-            items_f = [x for x in g["F_item"].dropna().astype(str).tolist() if x.strip()]
-            if items_f:
-                item_desc = ", ".join(items_f).upper()
-            else:
-                item_desc = "PERSONAL USE"
+            item_desc = f"{total_qty} {unit} OF PERSONAL USE"
+
+        # Combine all tracking numbers for shipping_mark field
+        tracking_numbers = [str(x) for x in g['TRACKING_NO'].dropna().tolist()]
+        shipping_mark = ", ".join(tracking_numbers) if tracking_numbers else "NO_TRACKING"
 
         bills.append(Bill(
             shipping_mark=shipping_mark,
-            customer_id=customer_id,
-            customer_name=name,
+            customer_id=phone,
+            customer_name=customer_name,
             phone=phone,
-            location=location_default,
+            location=location,
             total_cbm=round(total_cbm, 3),
             rate_usd_per_cbm=rate_usd_per_cbm,
-
             other_cost_usd=other_cost_usd,
             item_description=item_desc,
             breakdown_items=breakdown_items
         ))
 
     # Stable sort for nice outputs
-    bills.sort(key=lambda b: (b.shipping_mark or "", b.phone or ""))
+    bills.sort(key=lambda b: (b.customer_name or "", b.phone or ""))
     return bills
 
 
@@ -287,7 +298,7 @@ def render_pdf_for_bill(bill: Bill, template_html: str, out_path: Path,
         rate_usd_str=money_usd(bill.rate_usd_per_cbm),
         cbm_str=f"{bill.total_cbm:.2f}",
         payment_details=payment_details,
-        subtotal_usd_str=money_usd(bill.subtotal_usd if bill.total_cbm >= 0.05 else 10.0),
+        subtotal_usd_str=money_usd(bill.subtotal_usd),
         other_cost_usd_str=money_usd(bill.other_cost_usd),
         total_usd_str=money_usd(bill.total_usd),
         # shipping_mark=bill.shipping_mark,
@@ -302,10 +313,8 @@ def render_pdf_for_bill(bill: Bill, template_html: str, out_path: Path,
 
 
 def make_whatsapp_message(bill: Bill) -> str:
-    calc_usd = (bill.subtotal_usd if bill.total_cbm >= 0.05 else 10.0)
+    calc_usd = bill.subtotal_usd
     payment_line = f"{int(bill.rate_usd_per_cbm)} * {bill.total_cbm:.2f} = {money_usd(calc_usd)}"
-    if bill.total_cbm < 0.05:
-        payment_line = f"Min charge (CBM<0.05) = {money_usd(10.0)}"
 
     msg = (
         "I&C CARGO – GOODS BILL\n"
@@ -316,7 +325,6 @@ def make_whatsapp_message(bill: Bill) -> str:
         f"Rate: {money_usd(bill.rate_usd_per_cbm)}/CBM → {payment_line}\n"
         f"Other Cost: {money_usd(bill.other_cost_usd)}\n"
         f"Total: {money_usd(bill.total_usd)}\n"
-        "Note: CBM below 0.05 is charged fixed $10."
     )
     return msg
 
@@ -330,7 +338,7 @@ def export_summary_xlsx(bills: List[Bill], out_xlsx: Path) -> None:
             "Phone": b.phone,
             "TotalCBM": b.total_cbm,
             "Rate_USD_per_CBM": b.rate_usd_per_cbm,
-            "Subtotal_USD": (b.subtotal_usd if b.total_cbm >= 0.05 else 10.0),
+            "Subtotal_USD": b.subtotal_usd,
             "OtherCost_USD": b.other_cost_usd,
             "Total_USD": b.total_usd,
 
@@ -339,6 +347,7 @@ def export_summary_xlsx(bills: List[Bill], out_xlsx: Path) -> None:
     out_xlsx.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(out_xlsx, engine="xlsxwriter") as writer:
         df.to_excel(writer, index=False, sheet_name="Summary")
+
 
 
 def export_whatsapp_csv(bills: List[Bill], out_csv: Path) -> None:
@@ -404,6 +413,16 @@ class App(tk.Tk):
         self.log = tk.Text(frm, height=10, width=90)
         self.log.grid(row=row, column=0, columnspan=3, pady=(14,0))
         self._log("Ready. Select Excel, enter Rate, click Generate.")
+
+
+        row += 1
+        link = tk.Label(frm, text="Powered by DrQrack", fg="gray", cursor="hand2", font=("Arial", 8))
+        link.grid(row=row, column=0, columnspan=3, pady=(10, 0))
+        link.bind("<Button-1>", lambda e: self.open_email())
+
+    def open_email(self):
+        import webbrowser
+        webbrowser.open("mailto:drqrack@gmail.com")
 
     def _log(self, msg: str):
         self.log.insert("end", msg + "\n")
