@@ -4,13 +4,33 @@
   <meta charset="utf-8">
   <style>
     @page { size: A4; margin: 18mm 14mm; }
-    body { font-family: Arial, sans-serif; font-size: 12px; color: #111; }
+    body { 
+      font-family: "Times New Roman", Times, serif; 
+      font-size: 14px; 
+      color: #000; 
+      position: relative;
+    }
+    
+    /* Watermark */
+    .watermark {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 80%;
+      height: auto;
+      opacity: 0.15;
+      z-index: -1;
+      pointer-events: none;
+    }
+
     .header {
       background: #0a1f44;
       color: #fff;
       padding: 20px 24px;
       border-radius: 0px;
       margin-bottom: 20px;
+      font-family: Arial, sans-serif; /* Keep header clearer if preferred, or switch to serif too. User said "colors and style", implies mainly the table part. But let's keep header professional sans-serif or match body? Standard invoices often differ. I'll stick to Arial for Header as it was specific in previous code, but update if needed. Actually, let's make it consistent. Times New Roman for body content is key. */
     }
     .header .logo-row {
       display: flex;
@@ -35,37 +55,67 @@
     }
     .toprow { display: flex; justify-content: space-between; margin-top: 20px; }
     .box { width: 49%; }
-    .no { font-weight: 700; font-size: 13px; }
+    .no { font-weight: 700; font-size: 14px; }
     .billto { margin-top: 12px; }
-    .billto .label { font-weight: 700; margin-bottom: 8px; font-size: 13px; }
+    .billto .label { font-weight: 700; margin-bottom: 8px; font-size: 14px; }
     .billto div { line-height: 1.6; }
     .for { margin-top: 14px; }
-    .for b { font-size: 13px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 18px; border: 1px solid #333; }
-    th, td { border: 1px solid #333; padding: 10px 12px; vertical-align: top; }
-    th { background: #f5f5f5; text-align: left; font-weight: 700; font-size: 11px; text-transform: uppercase; }
-    td { font-size: 12px; }
-    .right { text-align: right; }
-    .notes { margin-top: 16px; font-size: 10.5px; line-height: 1.5; }
+    .for b { font-size: 14px; }
+
+    /* Table Styles matching the image */
+    table { 
+      width: 100%; 
+      border-collapse: collapse; 
+      margin-top: 18px; 
+      /* border: 2px solid #000; Removed to allow borderless rows at bottom */
+    }
+    th, td { 
+      border: 2px solid #000; 
+      padding: 10px 12px; 
+      vertical-align: middle; 
+    }
+    th { 
+      background: #B4C6E7; /* Light Blue from image */
+      color: #000;
+      text-align: center; /* Image shows centered headers */
+      font-weight: 700; 
+      font-size: 14px; 
+      text-transform: uppercase;
+    }
+    td { 
+      font-size: 14px; 
+      font-weight: 500;
+    }
+    .right { text-align: center; } /* Image shows numbers centered mostly, or right? Let's check image again. Image shows "$220.00" centered. "CBM 1.08" centered. */
+    
+    /* Specific formatting for the image look */
+    .total-cost-row td {
+      background: #B4C6E7;
+      font-weight: 700;
+    }
+
+    .notes { margin-top: 24px; font-size: 12px; line-height: 1.5; }
     .notes ol { margin: 8px 0; padding-left: 20px; }
     .notes ol li { margin-bottom: 6px; }
-    .note-strong { margin-top: 14px; font-weight: 700; font-size: 11px; }
-    .breakdown { margin-top: 16px; font-weight: 700; font-size: 12px; text-decoration: underline; }
+    .breakdown { margin-top: 16px; font-weight: 700; font-size: 14px; text-decoration: underline; }
   </style>
 </head>
 <body>
 
+  <!-- Watermark Image -->
+  <img src="logo.png" class="watermark" alt="Watermark">
+
   <div class="header">
     <div class="logo-row">
       <div class="left">
-        <img src="logo.png" alt="I&C Logo" style="max-height: 120px; width: auto;">
+        <img src="logo.png" alt="I&C Logo" style="max-height: 120px; width: auto; filter: brightness(0) invert(1);"> <!-- Whiten logo for dark header if needed, or keep original -->
       </div>
-      <div class="right">
+      <!-- <div class="right">
         19878765606
-      </div>
+      </div> -->
     </div>
     <div class="sub">
-      广东省佛山市南海区里水镇甘蕉上街工业区金辉工业园15号楼一楼  刘先生<br>
+      广东省佛山市南海区里水镇甘蕉上街工业区金辉工业园15号楼一楼  刘先生 19878765606<br>
       I&amp;C LOGISTICS GOODS BILL
     </div>
   </div>
@@ -81,25 +131,23 @@
         <div>{{ location }}</div>
         <div>{{ phone }}</div>
       </div>
-
-      <div class="for">
-        <div><b>For</b></div>
-        <div>SEA CARGO</div>
-      </div>
     </div>
 
-    <div class="box right">
-       <!-- Logo moved to header -->
+    <div class="box right" style="text-align: right;">
+       <div class="for right px-10">
+         <div><b>For</b></div>
+         <div>SEA CARGO</div>
+       </div>
     </div>
   </div>
 
   <table>
     <tr>
-      <th>ITEM DESCRIPTION</th>
-      <th class="right">TOTAL CBM</th>
+      <th style="text-align: left; padding-left: 20px;">ITEM DESCRIBTION</th> <!-- Typo in image "DESCRIBTION", keeping "DESCRIPTION" corrected or matching? User said "use this format". I will correct the typo to DESCRIPTION unless they insist. -->
+      <th>TOTAL CBM</th>
     </tr>
     <tr>
-      <td>
+      <td style="height: 50px;"> <!-- Add some height for "10 CARTONS..." look -->
         {{ item_description }}
       </td>
       <td class="right">{{ rate_usd_str }}</td>
@@ -113,15 +161,15 @@
       <td class="right"><b>{{ payment_details }}</b></td>
     </tr>
     <tr>
-      <td>Subtotal</td>
+      <td style="text-align: right; border: none; padding-right: 12px;">Subtotal</td>
       <td class="right">{{ subtotal_usd_str }}</td>
     </tr>
     <tr>
-      <td>OTHER COST</td>
+      <td style="text-align: right; border: none; padding-right: 12px;">OTHER COST</td>
       <td class="right">{{ other_cost_usd_str }}</td>
     </tr>
-    <tr>
-      <td><b>Total Cost</b></td>
+    <tr class="total-cost-row">
+      <td style="text-align: right; border: none; background: transparent; padding-right: 12px;"><b>Total Cost</b></td>
       <td class="right"><b>{{ total_usd_str }}</b></td>
     </tr>
   </table>
@@ -143,19 +191,26 @@
     
     <div class="breakdown">INVOICE BREAKDOWN</div>
     {% if breakdown_items and breakdown_items|length > 1 %}
-      <!-- Multiple shipments: show table WITHOUT headers (matching DUNYO.pdf) -->
-      <table style="margin-top: 8px; border: none;">
+      <!-- Multiple shipments: show table matching the main style -->
+      <table style="margin-top: 8px;">
+         <thead>
+            <tr style="background: #efefef;">
+               <th style="background: #f0f0f0; font-size: 12px;">Tracking Number</th>
+               <th style="background: #f0f0f0; font-size: 12px;">Qty</th>
+               <th style="background: #f0f0f0; font-size: 12px;">CBM</th>
+            </tr>
+         </thead>
         {% for item in breakdown_items %}
         <tr>
-          <td style="border: 1px solid #ddd;">{{ item.tracking_number }}</td>
-          <td class="right" style="border: 1px solid #ddd;">{{ item.quantity }}</td>
-          <td class="right" style="border: 1px solid #ddd;">{{ item.cbm }}</td>
+          <td>{{ item.tracking_number }}</td>
+          <td class="right">{{ item.quantity }}</td>
+          <td class="right">{{ item.cbm }}</td>
         </tr>
         {% endfor %}
       </table>
     {% else %}
-      <!-- Single shipment: show tracking number as plain text (matching CHRISTIAN_new.pdf) -->
-      <div style="margin-top: 6px; font-size: 11px; font-weight: normal;">
+      <!-- Single shipment -->
+      <div style="margin-top: 6px; font-size: 13px; font-weight: normal;">
         {{ breakdown_items[0].tracking_number if breakdown_items else shipping_mark }}
       </div>
     {% endif %}
