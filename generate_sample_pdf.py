@@ -11,20 +11,27 @@ sys.path.insert(0, str(Path(__file__).parent))
 from app import load_and_prepare_rows, build_bills, render_pdf_for_bill
 
 # Load Excel and build bills
-excel_path = Path("N005-N006 CONTAINER LIST.xlsx")
-df = load_and_prepare_rows(excel_path)
-bills = build_bills(df, rate_usd_per_cbm=235, other_cost_usd=0)
-
-# Get a sample bill (find one with interesting description)
-sample_bill = bills[0]  # First bill
+# Mock a bill with 0.01 CBM
+from app import Bill
+sample_bill = Bill(
+    shipping_mark="TEST-001",
+    customer_id="999",
+    customer_name="Test Customer 0.01 CBM",
+    phone="0000000000",
+    location="Test Location",
+    total_cbm=0.01,
+    rate_usd_per_cbm=240.0,
+    other_cost_usd=0.0,
+    item_description="1 PACKET OF TEST"
+)
 
 # Read template
 template_path = Path("template_invoice.html")
 template_html = template_path.read_text(encoding='utf-8')
 
 # Generate PDF
-output_path = Path("SAMPLE_INVOICE.pdf")
-invoice_no = "1C202600001"
+output_path = Path("SAMPLE_INVOICE_0.01CBM.pdf")
+invoice_no = "TEST-0.01"
 invoice_date = dt.datetime.now().strftime("%dTH %b, %Y").upper()
 
 print(f"Generating sample PDF for:")

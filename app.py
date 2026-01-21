@@ -97,6 +97,9 @@ class Bill:
 
     @property
     def subtotal_usd(self) -> float:
+        # Fixed charge for small CBM
+        if math.isclose(self.total_cbm, 0.01, abs_tol=1e-9):
+            return 3.00
         return self.rate_usd_per_cbm * self.total_cbm
 
     @property
@@ -105,7 +108,7 @@ class Bill:
 
     @property
     def total_usd(self) -> float:
-        return self.subtotal_usd + self.other_cost_usd
+        return float(round(self.subtotal_usd + self.other_cost_usd))
 
 
 
@@ -378,6 +381,10 @@ class App(tk.Tk):
         self.rate_var = tk.StringVar(value="240")
 
         self.other_cost_var = tk.StringVar(value="0")
+        
+        # Default date: current date formatted like "21ST JAN, 2026"
+        now_str = dt.datetime.now().strftime("%dTH %b, %Y").upper()
+        self.date_var = tk.StringVar(value=now_str)
 
         self._build()
 
@@ -407,12 +414,16 @@ class App(tk.Tk):
         tk.Entry(frm, textvariable=self.other_cost_var, width=20).grid(row=row, column=1, sticky="w", pady=(8,0))
 
         row += 1
+        tk.Label(frm, text="Invoice Date:").grid(row=row, column=0, sticky="w", pady=(8,0))
+        tk.Entry(frm, textvariable=self.date_var, width=20).grid(row=row, column=1, sticky="w", pady=(8,0))
+
+        row += 1
         tk.Button(frm, text="Generate", command=self.generate, width=20, height=2).grid(row=row, column=1, sticky="w", pady=(18,0))
 
         row += 1
         self.log = tk.Text(frm, height=10, width=90)
         self.log.grid(row=row, column=0, columnspan=3, pady=(14,0))
-        self._log("Ready. Select Excel, enter Rate, click Generate.")
+        self._log("Ready. Select Excel, enter Rate, check Date, click Generate.")
 
 
         row += 1
@@ -482,7 +493,9 @@ class App(tk.Tk):
 
         self._log(f"Generating {len(bills)} bills...")
 
-        invoice_date = dt.datetime.now().strftime("%dTH %b, %Y").upper()
+        # invoice_date = dt.datetime.now().strftime("%dTH %b, %Y").upper()
+        # Use user input date
+        invoice_date = self.date_var.get().strip().upper()
 
         for i, b in enumerate(bills, start=1):
             # Invoice number: simple unique per bill (can be changed to your exact sequence later)
