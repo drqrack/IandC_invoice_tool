@@ -45,6 +45,6 @@ print()
 render_pdf_for_bill(sample_bill, template_html, output_path, 
                     invoice_no=invoice_no, invoice_date=invoice_date)
 
-print(f"✓ Sample PDF generated successfully: {output_path}")
+print(f"[OK] Sample PDF generated successfully: {output_path}")
 print()
 print("You can now open this PDF to verify the new styling and item description format.")

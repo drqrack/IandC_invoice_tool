@@ -1,6 +1,6 @@
 pandas
 jinja2
-weasyprint
+playwright
 xlsxwriter
 openpyxl
 pyinstaller

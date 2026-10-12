@@ -10,7 +10,31 @@ from typing import Optional, List, Dict, Any
 
 import pandas as pd
 from jinja2 import Template
-from weasyprint import HTML
+
+import sys
+import io
+
+_PLAYWRIGHT_AVAILABLE = False
+_WEASYPRINT_AVAILABLE = False
+
+try:
+    from playwright.sync_api import sync_playwright
+    _PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    pass
+
+# Silently try importing WeasyPrint without printing GTK missing warnings
+_out_bak, _err_bak = sys.stdout, sys.stderr
+sys.stdout, sys.stderr = io.StringIO(), io.StringIO()
+try:
+    from weasyprint import HTML as WeasyHTML
+    _WEASYPRINT_AVAILABLE = True
+except Exception:
+    pass
+finally:
+    sys.stdout, sys.stderr = _out_bak, _err_bak
+
+
 
 
 # =========================
@@ -285,11 +309,11 @@ def build_bills(df: pd.DataFrame,
 # PDF + Exports
 # =========================
 
-def render_pdf_for_bill(bill: Bill, template_html: str, out_path: Path,
-                        invoice_no: str, invoice_date: str) -> None:
-
-    # payment details line exactly like sample: "240*0.42"
+def _prepare_html(bill: Bill, template_html: str, invoice_no: str, invoice_date: str) -> str:
     payment_details = f"{int(bill.rate_usd_per_cbm)}*{bill.total_cbm:.2f}"
+
+    logo_path = Path("logo.png").resolve()
+    logo_uri = logo_path.as_uri() if logo_path.exists() else "logo.png"
 
     html = Template(template_html).render(
         invoice_no=invoice_no,
@@ -304,15 +328,62 @@ def render_pdf_for_bill(bill: Bill, template_html: str, out_path: Path,
         subtotal_usd_str=money_usd(bill.subtotal_usd),
         other_cost_usd_str=money_usd(bill.other_cost_usd),
         total_usd_str=money_usd(bill.total_usd),
-        # shipping_mark=bill.shipping_mark,
         shipping_mark=bill.shipping_mark.replace(", ", "\n"),
         breakdown_items=bill.breakdown_items
-
     )
+    return html.replace('src="logo.png"', f'src="{logo_uri}"')
 
+
+def render_pdf_for_bill(bill: Bill, template_html: str, out_path: Path,
+                        invoice_no: str, invoice_date: str, page: Any = None) -> None:
+    html = _prepare_html(bill, template_html, invoice_no, invoice_date)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    # base_url="." allows WeasyPrint to find "logo.png" in the current directory
-    HTML(string=html, base_url=".").write_pdf(str(out_path))
+
+    if page is not None:
+        page.set_content(html, wait_until="domcontentloaded")
+        page.pdf(path=str(out_path), format="A4", print_background=True)
+        return
+
+    if _PLAYWRIGHT_AVAILABLE:
+        with sync_playwright() as p:
+            try:
+                browser = p.chromium.launch(channel="msedge")
+            except Exception:
+                browser = p.chromium.launch()
+            b_page = browser.new_page()
+            b_page.set_content(html, wait_until="domcontentloaded")
+            b_page.pdf(path=str(out_path), format="A4", print_background=True)
+            browser.close()
+        return
+
+    if _WEASYPRINT_AVAILABLE:
+        WeasyHTML(string=html, base_url=".").write_pdf(str(out_path))
+        return
+
+    edge_paths = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+    ]
+    msedge = next((p for p in edge_paths if Path(p).exists()), None)
+    if msedge:
+        tmp_html = out_path.with_suffix(".tmp.html")
+        tmp_html.write_text(html, encoding="utf-8")
+        import subprocess
+        cmd = [
+            msedge,
+            "--headless=new",
+            "--disable-gpu",
+            "--no-pdf-header-footer",
+            f"--print-to-pdf={out_path.resolve()}",
+            tmp_html.resolve().as_uri()
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if tmp_html.exists():
+            tmp_html.unlink()
+        return
+
+    raise RuntimeError("No PDF renderer available. Please install 'playwright' or GTK libraries for WeasyPrint.")
+
 
 
 def make_whatsapp_message(bill: Bill) -> str:
@@ -360,6 +431,16 @@ def export_whatsapp_csv(bills: List[Bill], out_csv: Path) -> None:
         w.writerow(["Phone", "ShippingMark", "CustomerName", "Message"])
         for b in bills:
             w.writerow([b.phone, b.shipping_mark, b.customer_name, make_whatsapp_message(b)])
+
+
+def export_customer_pdf_mapping_csv(bills: List[Bill], pdf_filenames: List[str], out_csv: Path) -> None:
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["customer name", "customer number", "pdf filename"])
+        for b, pdf_name in zip(bills, pdf_filenames):
+            w.writerow([b.customer_name, b.phone, pdf_name])
+
 
 
 # =========================
@@ -497,28 +578,49 @@ class App(tk.Tk):
         # Use user input date
         invoice_date = self.date_var.get().strip().upper()
 
-        for i, b in enumerate(bills, start=1):
-            # Invoice number: simple unique per bill (can be changed to your exact sequence later)
-            invoice_no = "1C" + dt.datetime.now().strftime("%Y") + str(uuid.uuid4().int)[0:8]
+        pdf_filenames = []
+        if _PLAYWRIGHT_AVAILABLE:
+            with sync_playwright() as p:
+                try:
+                    browser = p.chromium.launch(channel="msedge")
+                except Exception:
+                    browser = p.chromium.launch()
+                page = browser.new_page()
+                for i, b in enumerate(bills, start=1):
+                    invoice_no = "1C" + dt.datetime.now().strftime("%Y") + str(uuid.uuid4().int)[0:8]
+                    name_part = safe_filename(b.customer_name) or "UNKNOWN"
+                    phone_part = safe_filename(b.phone) or "NO_PHONE"
+                    pdf_name = f"CUSTOMER - {name_part} - {phone_part}.pdf"
+                    pdf_filenames.append(pdf_name)
+                    out_pdf = pdf_dir / pdf_name
 
-            name_part = safe_filename(b.customer_name) or "UNKNOWN"
-            phone_part = safe_filename(b.phone) or "NO_PHONE"
-            # ship_part = safe_filename(b.shipping_mark) or "NO_SHIPPING_MARK"
+                    render_pdf_for_bill(b, template_html, out_pdf, invoice_no=invoice_no, invoice_date=invoice_date, page=page)
 
-            # pdf_name = f"{ship_part} - {name_part} - {phone_part}.pdf"
-            pdf_name = f"CUSTOMER - {name_part} - {phone_part}.pdf"
-            out_pdf = pdf_dir / pdf_name
+                    if i % 20 == 0:
+                        self._log(f"... {i}/{len(bills)} PDFs done")
+                browser.close()
+        else:
+            for i, b in enumerate(bills, start=1):
+                invoice_no = "1C" + dt.datetime.now().strftime("%Y") + str(uuid.uuid4().int)[0:8]
+                name_part = safe_filename(b.customer_name) or "UNKNOWN"
+                phone_part = safe_filename(b.phone) or "NO_PHONE"
+                pdf_name = f"CUSTOMER - {name_part} - {phone_part}.pdf"
+                pdf_filenames.append(pdf_name)
+                out_pdf = pdf_dir / pdf_name
 
-            render_pdf_for_bill(b, template_html, out_pdf, invoice_no=invoice_no, invoice_date=invoice_date)
+                render_pdf_for_bill(b, template_html, out_pdf, invoice_no=invoice_no, invoice_date=invoice_date)
 
-            if i % 20 == 0:
-                self._log(f"... {i}/{len(bills)} PDFs done")
+                if i % 20 == 0:
+                    self._log(f"... {i}/{len(bills)} PDFs done")
 
         export_whatsapp_csv(bills, run_dir / "WhatsApp_Messages.csv")
         export_summary_xlsx(bills, run_dir / "Summary.xlsx")
+        export_customer_pdf_mapping_csv(bills, pdf_filenames, run_dir / "Customer_PDF_Mapping.csv")
+
 
         self._log(f"Done. Output folder: {run_dir}")
-        messagebox.showinfo("Done", f"Generated {len(bills)} PDFs + WhatsApp CSV + Summary.xlsx\n\n{run_dir}")
+        messagebox.showinfo("Done", f"Generated {len(bills)} PDFs + WhatsApp CSV + Summary.xlsx + Customer_PDF_Mapping.csv\n\n{run_dir}")
+
 
 if __name__ == "__main__":
     App().mainloop()
